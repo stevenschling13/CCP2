@@ -9,34 +9,38 @@ interface CameraViewProps {
 export const CameraView: React.FC<CameraViewProps> = ({ onAnalyze, onClose }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AiDiagnosis | null>(null);
   const [showFullReport, setShowFullReport] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     async function setupCamera() {
       try {
-        const ms = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } 
+        const ms = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
         });
         if (mounted) {
-            setStream(ms);
+            streamRef.current = ms;
+            setCameraError(null);
             if (videoRef.current) {
                 videoRef.current.srcObject = ms;
             }
         }
       } catch (e) {
         console.error("Camera access denied", e);
+        setCameraError('Unable to access the camera. Please grant permission and ensure the lens is free.');
       }
     }
     setupCamera();
 
     return () => {
       mounted = false;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
     };
   }, []); // Only mount once
@@ -86,6 +90,14 @@ export const CameraView: React.FC<CameraViewProps> = ({ onAnalyze, onClose }) =>
         <span className="text-neon-green font-mono text-sm uppercase tracking-widest bg-black/50 px-2 py-1 rounded">Vision Mode</span>
         <div className="w-8"></div>
       </div>
+
+      {cameraError && (
+        <div className="absolute top-14 left-0 right-0 z-20 px-4">
+          <div className="bg-red-900/70 border border-red-700 text-red-100 text-sm rounded-lg p-3">
+            {cameraError}
+          </div>
+        </div>
+      )}
 
       {/* Main Viewport */}
       <div className="flex-1 relative bg-neutral-900 overflow-hidden">
@@ -213,12 +225,12 @@ export const CameraView: React.FC<CameraViewProps> = ({ onAnalyze, onClose }) =>
 
       {/* Footer Controls (Visible behind sheet but practically hidden when expanded) */}
       <div className="h-32 bg-black flex items-center justify-center relative">
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neutral-800 to-transparent"></div>
-        <button 
-            onClick={handleCapture}
-            disabled={isCapturing || analysisResult !== null}
-            className={`w-16 h-16 rounded-full border-4 flex items-center justify-center active:scale-95 transition-all ${analysisResult ? 'border-gray-600 opacity-50' : 'border-white'}`}
-        >
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-neutral-800 to-transparent"></div>
+          <button
+              onClick={handleCapture}
+              disabled={isCapturing || analysisResult !== null || !!cameraError}
+              className={`w-16 h-16 rounded-full border-4 flex items-center justify-center active:scale-95 transition-all ${analysisResult ? 'border-gray-600 opacity-50' : 'border-white'}`}
+          >
             <div className={`w-14 h-14 rounded-full bg-white ${isCapturing ? 'scale-90 opacity-50' : ''} transition-all`}></div>
         </button>
       </div>
