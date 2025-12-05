@@ -18,25 +18,24 @@ export const ChatInterface: React.FC = () => {
         if (!input.trim() || isLoading) return;
         
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: input, timestamp: Date.now() };
-        const thinkingMessage: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: '', timestamp: Date.now(), isThinking: true };
-
-        const nextMessages = [...messages, userMsg, thinkingMessage];
-        setMessages(nextMessages);
+        setMessages(prev => [...prev, userMsg]);
         setInput('');
         setIsLoading(true);
 
         try {
-            // Stream response (simulated stream for now via service)
-            const responseText = await geminiService.chat(nextMessages.filter(m => !m.isThinking));
+            // Optimistic AI message
+            const thinkingId = (Date.now() + 1).toString();
+            setMessages(prev => [...prev, { id: thinkingId, role: 'model', text: '', timestamp: Date.now(), isThinking: true }]);
 
-            setMessages(prev => prev.map(m =>
-                m.id === thinkingMessage.id ? { ...m, text: responseText, isThinking: false } : m
+            // Stream response (simulated stream for now via service)
+            const responseText = await geminiService.chat(messages, userMsg.text);
+            
+            setMessages(prev => prev.map(m => 
+                m.id === thinkingId ? { ...m, text: responseText, isThinking: false } : m
             ));
 
         } catch (e) {
-            const errorMessage = e instanceof Error ? e.message : 'Unknown error connecting to the AI service.';
-            console.error('Chat send failed', e);
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: `Sorry, I encountered an error: ${errorMessage}`, timestamp: Date.now() }]);
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: "Sorry, I encountered an error connecting to the neural network.", timestamp: Date.now() }]);
         } finally {
             setIsLoading(false);
         }

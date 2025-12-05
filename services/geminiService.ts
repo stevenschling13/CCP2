@@ -8,26 +8,15 @@ const MODEL_FAST = 'gemini-2.5-flash';
 const MODEL_VISION = 'gemini-2.5-flash'; // 2.5 flash is great for fast vision
 
 class GeminiService {
-  private ai: GoogleGenAI | null = null;
+  private ai: GoogleGenAI;
   private consecutiveFailures = 0;
   private lastFailureTime = 0;
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
   private readonly COOLDOWN_MS = 60000; // 1 minute
 
-  private getClient(): GoogleGenAI {
-    if (!this.ai) {
-      const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-
-      if (!apiKey) {
-        const message = 'Gemini API key missing. Set GEMINI_API_KEY (or legacy API_KEY) in your environment.';
-        console.error(message);
-        throw new Error(message);
-      }
-
-      this.ai = new GoogleGenAI({ apiKey });
-    }
-
-    return this.ai;
+  constructor() {
+    const apiKey = process.env.API_KEY || '';
+    this.ai = new GoogleGenAI({ apiKey });
   }
 
   private checkCircuitBreaker() {
@@ -64,15 +53,13 @@ class GeminiService {
 
   async generateFacilityBriefing(rooms: Room[]): Promise<FacilityBriefing> {
     return this.withRetry(async () => {
-      const ai = this.getClient();
-
-      const roomData = rooms.map(r =>
+      const roomData = rooms.map(r => 
         `${r.name}: ${r.status} (Temp: ${r.currentReading?.temp}C, RH: ${r.currentReading?.humidity}%)`
       ).join('\n');
 
       const prompt = `${BRIEFING_PROMPT}\nCurrent Sensor Data:\n${roomData}`;
 
-      const response = await ai.models.generateContent({
+      const response = await this.ai.models.generateContent({
         model: MODEL_FAST,
         contents: prompt,
         config: {
@@ -96,9 +83,7 @@ class GeminiService {
 
   async analyzePlantImage(imageBase64: string): Promise<AiDiagnosis> {
     return this.withRetry(async () => {
-      const ai = this.getClient();
-
-      const response = await ai.models.generateContent({
+      const response = await this.ai.models.generateContent({
         model: MODEL_VISION,
         contents: {
           parts: [
@@ -125,19 +110,19 @@ class GeminiService {
     });
   }
 
-  async chat(history: ChatMessage[]): Promise<string> {
+  async chat(history: ChatMessage[], newMessage: string): Promise<string> {
     return this.withRetry(async () => {
-        const ai = this.getClient();
         // Manual history construction for chat
         // Filter out thinking logs or partials if we had them
-        const contents = history
-            .filter(h => !h.isThinking)
-            .map(h => ({
-                role: h.role,
-                parts: [{ text: h.text }]
-            }));
+        const contents = history.map(h => ({
+            role: h.role,
+            parts: [{ text: h.text }]
+        }));
+        
+        // Add new message
+        contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-        const response = await ai.models.generateContent({
+        const response = await this.ai.models.generateContent({
             model: MODEL_REASONING,
             contents: contents,
             config: {
@@ -151,14 +136,13 @@ class GeminiService {
   }
   
   async chatStream(history: ChatMessage[], newMessage: string): Promise<AsyncIterable<string>> {
-      const ai = this.getClient();
       const contents = history.map(h => ({
           role: h.role,
           parts: [{ text: h.text }]
       }));
       contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-      const responseStream = await ai.models.generateContentStream({
+      const responseStream = await this.ai.models.generateContentStream({
           model: MODEL_REASONING,
           contents: contents,
           config: {
