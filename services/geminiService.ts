@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { FacilityBriefing, AiDiagnosis, ChatMessage, Room } from "../types";
 import { BRIEFING_PROMPT, SYSTEM_INSTRUCTION_GROWER } from "../constants";
 
@@ -127,7 +127,7 @@ class GeminiService {
             contents: contents,
             config: {
                 systemInstruction: SYSTEM_INSTRUCTION_GROWER,
-                thinkingConfig: { thinkingBudget: 1024 } // Use thinking for reasoning model
+                // thinkingConfig: { thinkingBudget: 1024 } // Removed: Not available for gemini-3-pro-preview
             }
         });
 
@@ -136,15 +136,28 @@ class GeminiService {
   }
   
   async chatStream(history: ChatMessage[], newMessage: string): Promise<AsyncIterable<string>> {
-      // Stream wrapper not fully implemented for brevity in this single file, 
-      // but standard generator pattern would apply. 
-      // Returning full response for now to ensure reliability in this specific prompt context.
-      const text = await this.chat(history, newMessage);
-      
-      // Async generator to simulate stream if needed by UI
+      const contents = history.map(h => ({
+          role: h.role,
+          parts: [{ text: h.text }]
+      }));
+      contents.push({ role: 'user', parts: [{ text: newMessage }] });
+
+      const responseStream = await this.ai.models.generateContentStream({
+          model: MODEL_REASONING,
+          contents: contents,
+          config: {
+              systemInstruction: SYSTEM_INSTRUCTION_GROWER,
+              // thinkingConfig: { thinkingBudget: 1024 } // Removed: Not available for gemini-3-pro-preview
+          }
+      });
+
       return {
           async *[Symbol.asyncIterator]() {
-              yield text;
+              for await (const chunk of responseStream) {
+                  if (chunk.text) {
+                      yield chunk.text;
+                  }
+              }
           }
       };
   }
