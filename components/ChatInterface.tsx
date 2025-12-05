@@ -34,7 +34,9 @@ export const ChatInterface: React.FC = () => {
             ));
 
         } catch (e) {
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: "Sorry, I encountered an error connecting to the neural network.", timestamp: Date.now() }]);
+            const errorMessage = e instanceof Error ? e.message : 'Unknown error connecting to the AI service.';
+            console.error('Chat send failed', e);
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: `Sorry, I encountered an error: ${errorMessage}`, timestamp: Date.now() }]);
         } finally {
             setIsLoading(false);
         }
