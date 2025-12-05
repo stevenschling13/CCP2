@@ -1,0 +1,8 @@
+{
+  "name": "Cultivator's CoPilot",
+  "description": "AI-powered grow assistant with offline-first logging, real-time environmental monitoring, and computer vision diagnosis.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
