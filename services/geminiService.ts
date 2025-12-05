@@ -7,16 +7,60 @@ const MODEL_REASONING = 'gemini-3-pro-preview';
 const MODEL_FAST = 'gemini-2.5-flash';
 const MODEL_VISION = 'gemini-2.5-flash'; // 2.5 flash is great for fast vision
 
+const LOCAL_STORAGE_KEY = 'ccp_api_key';
+const FALLBACK_USER_KEY = 'AIzaSyBtwr9MA43_bPB73POu_HOuAj5C65Ru3u8';
+
+const resolveInitialKey = () => {
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (stored) return stored;
+  }
+
+  return (typeof import.meta !== 'undefined' ? import.meta.env.VITE_API_KEY : '')
+    || (typeof process !== 'undefined' ? process.env.API_KEY : '')
+    || FALLBACK_USER_KEY;
+};
+
 class GeminiService {
-  private ai: GoogleGenAI;
+  private ai: GoogleGenAI | null = null;
+  private apiKey: string = '';
   private consecutiveFailures = 0;
   private lastFailureTime = 0;
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
   private readonly COOLDOWN_MS = 60000; // 1 minute
 
   constructor() {
-    const apiKey = process.env.API_KEY || '';
-    this.ai = new GoogleGenAI({ apiKey });
+    const apiKey = resolveInitialKey();
+    if (apiKey) {
+      this.setApiKey(apiKey, false);
+    }
+  }
+
+  get currentKey() {
+    return this.apiKey;
+  }
+
+  setApiKey(apiKey: string, persist = true) {
+    const trimmedKey = (apiKey || '').trim();
+    if (!trimmedKey) {
+      this.ai = null;
+      this.apiKey = '';
+      throw new Error('Gemini API key is missing. Please add it in Settings.');
+    }
+
+    this.ai = new GoogleGenAI({ apiKey: trimmedKey });
+    this.apiKey = trimmedKey;
+
+    if (persist && typeof localStorage !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_KEY, trimmedKey);
+    }
+  }
+
+  private requireClient() {
+    if (!this.ai) {
+      throw new Error('Gemini client not configured. Please set an API key in Settings.');
+    }
+    return this.ai;
   }
 
   private checkCircuitBreaker() {
@@ -59,7 +103,9 @@ class GeminiService {
 
       const prompt = `${BRIEFING_PROMPT}\nCurrent Sensor Data:\n${roomData}`;
 
-      const response = await this.ai.models.generateContent({
+      const aiClient = this.requireClient();
+
+      const response = await aiClient.models.generateContent({
         model: MODEL_FAST,
         contents: prompt,
         config: {
@@ -83,7 +129,9 @@ class GeminiService {
 
   async analyzePlantImage(imageBase64: string): Promise<AiDiagnosis> {
     return this.withRetry(async () => {
-      const response = await this.ai.models.generateContent({
+      const aiClient = this.requireClient();
+
+      const response = await aiClient.models.generateContent({
         model: MODEL_VISION,
         contents: {
           parts: [
@@ -122,7 +170,9 @@ class GeminiService {
         // Add new message
         contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-        const response = await this.ai.models.generateContent({
+        const aiClient = this.requireClient();
+
+        const response = await aiClient.models.generateContent({
             model: MODEL_REASONING,
             contents: contents,
             config: {
@@ -142,7 +192,9 @@ class GeminiService {
       }));
       contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-      const responseStream = await this.ai.models.generateContentStream({
+      const aiClient = this.requireClient();
+
+      const responseStream = await aiClient.models.generateContentStream({
           model: MODEL_REASONING,
           contents: contents,
           config: {

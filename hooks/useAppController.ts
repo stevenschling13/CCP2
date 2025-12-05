@@ -2,7 +2,15 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { dbService } from '../services/db';
 import { hardwareService } from '../services/hardwareService';
 import { geminiService } from '../services/geminiService';
-import { PlantBatch, Room, GrowLog, FacilityBriefing, LogType } from '../types';
+import { PlantBatch, Room, GrowLog, FacilityBriefing, LogType, UserSettings } from '../types';
+
+const SETTINGS_STORAGE_KEY = 'ccp_settings';
+const DEFAULT_SETTINGS: UserSettings = {
+  apiKey: geminiService.currentKey,
+  theme: 'dark',
+  units: 'metric',
+  notificationsEnabled: true,
+};
 
 export const useAppController = () => {
   // State
@@ -11,7 +19,10 @@ export const useAppController = () => {
   const [logs, setLogs] = useState<GrowLog[]>([]);
   const [briefing, setBriefing] = useState<FacilityBriefing | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'camera' | 'chat'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'camera' | 'chat' | 'settings'>('dashboard');
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
+  const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   // Initialization
   useEffect(() => {
@@ -42,6 +53,32 @@ export const useAppController = () => {
     return () => hardwareService.stopSimulation();
   }, []);
 
+  useEffect(() => {
+    const storedSettings = typeof localStorage !== 'undefined'
+      ? localStorage.getItem(SETTINGS_STORAGE_KEY)
+      : null;
+
+    if (storedSettings) {
+      try {
+        const parsed = JSON.parse(storedSettings) as UserSettings;
+        const merged = { ...DEFAULT_SETTINGS, ...parsed };
+        setSettings(merged);
+        if (merged.apiKey) {
+          geminiService.setApiKey(merged.apiKey, false);
+        }
+      } catch (e) {
+        console.error('Failed to load settings', e);
+        setSettingsError('Could not load saved settings.');
+      }
+    } else if (DEFAULT_SETTINGS.apiKey) {
+      try {
+        geminiService.setApiKey(DEFAULT_SETTINGS.apiKey, false);
+      } catch (e) {
+        setSettingsError((e as Error).message);
+      }
+    }
+  }, []);
+
   // Hardware subscriptions
   useEffect(() => {
     const unsubscribe = hardwareService.onReading((roomId, reading) => {
@@ -61,6 +98,37 @@ export const useAppController = () => {
   }, []);
 
   // Actions
+  const persistSettings = useCallback((next: UserSettings) => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+    }
+  }, []);
+
+  const updateSettings = useCallback((partial: Partial<UserSettings>) => {
+    setSettings(prev => {
+      const merged = { ...prev, ...partial };
+      persistSettings(merged);
+      return merged;
+    });
+
+    if (partial.apiKey !== undefined) {
+      try {
+        geminiService.setApiKey(partial.apiKey);
+        setSettingsError(null);
+        setSettingsStatus('Gemini API key saved');
+      } catch (e) {
+        setSettingsError((e as Error).message);
+      }
+    } else {
+      setSettingsStatus('Settings updated');
+    }
+  }, [persistSettings]);
+
+  const clearSettingsFeedback = useCallback(() => {
+    setSettingsStatus(null);
+    setSettingsError(null);
+  }, []);
+
   const generateBriefing = useCallback(async (currentRooms: Room[]) => {
     try {
       const result = await geminiService.generateFacilityBriefing(currentRooms);
@@ -115,13 +183,18 @@ export const useAppController = () => {
       logs,
       briefing,
       isAiLoading,
-      activeTab
+      activeTab,
+      settings,
+      settingsStatus,
+      settingsError
     },
     actions: {
       setActiveTab,
       addLog,
       handleImageAnalysis,
-      refreshBriefing: () => generateBriefing(rooms)
+      refreshBriefing: () => generateBriefing(rooms),
+      updateSettings,
+      clearSettingsFeedback
     }
   };
 };
