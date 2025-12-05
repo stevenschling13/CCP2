@@ -18,20 +18,19 @@ export const ChatInterface: React.FC = () => {
         if (!input.trim() || isLoading) return;
         
         const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: input, timestamp: Date.now() };
-        setMessages(prev => [...prev, userMsg]);
+        const thinkingMessage: ChatMessage = { id: (Date.now() + 1).toString(), role: 'model', text: '', timestamp: Date.now(), isThinking: true };
+
+        const nextMessages = [...messages, userMsg, thinkingMessage];
+        setMessages(nextMessages);
         setInput('');
         setIsLoading(true);
 
         try {
-            // Optimistic AI message
-            const thinkingId = (Date.now() + 1).toString();
-            setMessages(prev => [...prev, { id: thinkingId, role: 'model', text: '', timestamp: Date.now(), isThinking: true }]);
-
             // Stream response (simulated stream for now via service)
-            const responseText = await geminiService.chat(messages, userMsg.text);
-            
-            setMessages(prev => prev.map(m => 
-                m.id === thinkingId ? { ...m, text: responseText, isThinking: false } : m
+            const responseText = await geminiService.chat(nextMessages.filter(m => !m.isThinking));
+
+            setMessages(prev => prev.map(m =>
+                m.id === thinkingMessage.id ? { ...m, text: responseText, isThinking: false } : m
             ));
 
         } catch (e) {
