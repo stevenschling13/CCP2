@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { FacilityBriefing, AiDiagnosis, ChatMessage, Room } from "../types";
+import { FacilityBriefing, AiDiagnosis, ChatMessage, Room, ArOverlayData } from "../types";
 import { BRIEFING_PROMPT, SYSTEM_INSTRUCTION_GROWER } from "../constants";
 
 // Models
@@ -7,60 +7,20 @@ const MODEL_REASONING = 'gemini-3-pro-preview';
 const MODEL_FAST = 'gemini-2.5-flash';
 const MODEL_VISION = 'gemini-2.5-flash'; // 2.5 flash is great for fast vision
 
-const LOCAL_STORAGE_KEY = 'ccp_api_key';
-const FALLBACK_USER_KEY = 'AIzaSyBtwr9MA43_bPB73POu_HOuAj5C65Ru3u8';
-
-const resolveInitialKey = () => {
-  if (typeof localStorage !== 'undefined') {
-    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (stored) return stored;
-  }
-
-  return (typeof import.meta !== 'undefined' ? import.meta.env.VITE_API_KEY : '')
-    || (typeof process !== 'undefined' ? process.env.API_KEY : '')
-    || FALLBACK_USER_KEY;
-};
-
 class GeminiService {
-  private ai: GoogleGenAI | null = null;
-  private apiKey: string = '';
+  private ai: GoogleGenAI;
   private consecutiveFailures = 0;
   private lastFailureTime = 0;
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
   private readonly COOLDOWN_MS = 60000; // 1 minute
 
+  // Cache
+  private briefingCache: { data: FacilityBriefing, timestamp: number } | null = null;
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
   constructor() {
-    const apiKey = resolveInitialKey();
-    if (apiKey) {
-      this.setApiKey(apiKey, false);
-    }
-  }
-
-  get currentKey() {
-    return this.apiKey;
-  }
-
-  setApiKey(apiKey: string, persist = true) {
-    const trimmedKey = (apiKey || '').trim();
-    if (!trimmedKey) {
-      this.ai = null;
-      this.apiKey = '';
-      throw new Error('Gemini API key is missing. Please add it in Settings.');
-    }
-
-    this.ai = new GoogleGenAI({ apiKey: trimmedKey });
-    this.apiKey = trimmedKey;
-
-    if (persist && typeof localStorage !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_KEY, trimmedKey);
-    }
-  }
-
-  private requireClient() {
-    if (!this.ai) {
-      throw new Error('Gemini client not configured. Please set an API key in Settings.');
-    }
-    return this.ai;
+    const apiKey = process.env.API_KEY || '';
+    this.ai = new GoogleGenAI({ apiKey });
   }
 
   private checkCircuitBreaker() {
@@ -96,6 +56,15 @@ class GeminiService {
   }
 
   async generateFacilityBriefing(rooms: Room[]): Promise<FacilityBriefing> {
+    // Check Cache
+    if (this.briefingCache && Date.now() - this.briefingCache.timestamp < this.CACHE_TTL) {
+        // Invalidate if room status is CRITICAL but cache says OPTIMAL (safety check)
+        const hasCritical = rooms.some(r => r.status === 'CRITICAL');
+        if (!hasCritical || this.briefingCache.data.status === 'CRITICAL') {
+            return this.briefingCache.data;
+        }
+    }
+
     return this.withRetry(async () => {
       const roomData = rooms.map(r => 
         `${r.name}: ${r.status} (Temp: ${r.currentReading?.temp}C, RH: ${r.currentReading?.humidity}%)`
@@ -103,9 +72,7 @@ class GeminiService {
 
       const prompt = `${BRIEFING_PROMPT}\nCurrent Sensor Data:\n${roomData}`;
 
-      const aiClient = this.requireClient();
-
-      const response = await aiClient.models.generateContent({
+      const response = await this.ai.models.generateContent({
         model: MODEL_FAST,
         contents: prompt,
         config: {
@@ -123,15 +90,18 @@ class GeminiService {
       });
 
       if (!response.text) throw new Error("Empty response from AI");
-      return JSON.parse(response.text) as FacilityBriefing;
+      const result = JSON.parse(response.text) as FacilityBriefing;
+      
+      // Update Cache
+      this.briefingCache = { data: result, timestamp: Date.now() };
+      
+      return result;
     });
   }
 
   async analyzePlantImage(imageBase64: string): Promise<AiDiagnosis> {
     return this.withRetry(async () => {
-      const aiClient = this.requireClient();
-
-      const response = await aiClient.models.generateContent({
+      const response = await this.ai.models.generateContent({
         model: MODEL_VISION,
         contents: {
           parts: [
@@ -158,10 +128,45 @@ class GeminiService {
     });
   }
 
+  async analyzeLiveFrame(imageBase64: string): Promise<ArOverlayData> {
+    // No retries for live frames to prevent lag
+    const response = await this.ai.models.generateContent({
+        model: MODEL_VISION,
+        contents: {
+            parts: [
+                { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
+                { text: "Scan this view. Detect plant parts or pests. Estimate health 0-100." }
+            ]
+        },
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    status: { type: Type.STRING, enum: ["SCANNING", "LOCKED", "ANALYZING"] },
+                    detectedObjects: { 
+                        type: Type.ARRAY, 
+                        items: { 
+                            type: Type.OBJECT, 
+                            properties: {
+                                label: { type: Type.STRING },
+                                confidence: { type: Type.NUMBER }
+                            }
+                        } 
+                    },
+                    healthEstimate: { type: Type.NUMBER }
+                }
+            }
+        }
+    });
+    
+    if (!response.text) return { status: 'SCANNING', detectedObjects: [], healthEstimate: 0 };
+    return JSON.parse(response.text) as ArOverlayData;
+  }
+
   async chat(history: ChatMessage[], newMessage: string): Promise<string> {
     return this.withRetry(async () => {
         // Manual history construction for chat
-        // Filter out thinking logs or partials if we had them
         const contents = history.map(h => ({
             role: h.role,
             parts: [{ text: h.text }]
@@ -170,14 +175,11 @@ class GeminiService {
         // Add new message
         contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-        const aiClient = this.requireClient();
-
-        const response = await aiClient.models.generateContent({
+        const response = await this.ai.models.generateContent({
             model: MODEL_REASONING,
             contents: contents,
             config: {
                 systemInstruction: SYSTEM_INSTRUCTION_GROWER,
-                // thinkingConfig: { thinkingBudget: 1024 } // Removed: Not available for gemini-3-pro-preview
             }
         });
 
@@ -192,14 +194,11 @@ class GeminiService {
       }));
       contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
-      const aiClient = this.requireClient();
-
-      const responseStream = await aiClient.models.generateContentStream({
+      const responseStream = await this.ai.models.generateContentStream({
           model: MODEL_REASONING,
           contents: contents,
           config: {
               systemInstruction: SYSTEM_INSTRUCTION_GROWER,
-              // thinkingConfig: { thinkingBudget: 1024 } // Removed: Not available for gemini-3-pro-preview
           }
       });
 

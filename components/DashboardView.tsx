@@ -18,6 +18,23 @@ const StatCard: React.FC<{ label: string; value: string; unit: string; color?: s
 );
 
 export const DashboardView: React.FC<DashboardProps> = ({ rooms, briefing, batches, onRefresh }) => {
+  const playBriefing = () => {
+    if (!briefing || typeof window === 'undefined') return;
+    
+    // Stop any existing speech
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(briefing.summary);
+    // Try to find a good voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => v.name.includes('Google') && v.lang.startsWith('en')) || voices[0];
+    if (preferredVoice) utterance.voice = preferredVoice;
+    
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    window.speechSynthesis.speak(utterance);
+  };
+
   return (
     <div className="space-y-6 pb-24">
       {/* Briefing Section */}
@@ -28,11 +45,26 @@ export const DashboardView: React.FC<DashboardProps> = ({ rooms, briefing, batch
                 <h2 className="text-neon-green font-bold tracking-widest text-sm uppercase mb-1">Facility Briefing</h2>
                 <div className="text-xs text-gray-500">AI-Generated • {new Date().toLocaleTimeString()}</div>
             </div>
-            <button onClick={onRefresh} className="p-2 hover:bg-neutral-800 rounded-full transition-colors">
-                <svg className="w-5 h-5 text-neon-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-            </button>
+            <div className="flex gap-2">
+                <button 
+                    onClick={playBriefing} 
+                    className="p-2 hover:bg-neutral-800 rounded-full transition-colors group"
+                    title="Read Briefing"
+                >
+                    <svg className="w-5 h-5 text-gray-400 group-hover:text-neon-blue transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                </button>
+                <button 
+                    onClick={onRefresh} 
+                    className="p-2 hover:bg-neutral-800 rounded-full transition-colors group"
+                    title="Refresh Data"
+                >
+                    <svg className="w-5 h-5 text-gray-400 group-hover:text-neon-green transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                </button>
+            </div>
         </div>
         
         {briefing ? (

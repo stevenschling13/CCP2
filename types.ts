@@ -94,12 +94,3 @@ export interface ArOverlayData {
   detectedObjects: Array<{label: string, confidence: number}>;
   healthEstimate: number;
 }
-
-export type MeasurementUnits = 'metric' | 'imperial';
-
-export interface UserSettings {
-  apiKey: string;
-  theme: 'dark' | 'light';
-  units: MeasurementUnits;
-  notificationsEnabled: boolean;
-}
