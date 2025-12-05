@@ -66,7 +66,7 @@ export const useAppController = () => {
       const result = await geminiService.generateFacilityBriefing(currentRooms);
       setBriefing(result);
     } catch (e) {
-      console.warn("Briefing generation failed", e);
+      console.error("Briefing generation failed", e);
     }
   }, []);
 
