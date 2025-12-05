@@ -110,17 +110,16 @@ class GeminiService {
     });
   }
 
-  async chat(history: ChatMessage[], newMessage: string): Promise<string> {
+  async chat(history: ChatMessage[]): Promise<string> {
     return this.withRetry(async () => {
         // Manual history construction for chat
         // Filter out thinking logs or partials if we had them
-        const contents = history.map(h => ({
-            role: h.role,
-            parts: [{ text: h.text }]
-        }));
-        
-        // Add new message
-        contents.push({ role: 'user', parts: [{ text: newMessage }] });
+        const contents = history
+            .filter(h => !h.isThinking)
+            .map(h => ({
+                role: h.role,
+                parts: [{ text: h.text }]
+            }));
 
         const response = await this.ai.models.generateContent({
             model: MODEL_REASONING,
