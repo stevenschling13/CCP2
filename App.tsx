@@ -36,7 +36,7 @@ const App: React.FC = () => {
                     onRefresh={actions.refreshBriefing}
                 />
             )}
-            {state.activeTab === 'chat' && <ChatInterface />}
+            {state.activeTab === 'chat' && <ChatInterface rooms={state.rooms} batches={state.batches} />}
          </Suspense>
       </main>
 

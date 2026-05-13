@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { FacilityBriefing, AiDiagnosis, ChatMessage, Room, ArOverlayData } from "../types";
+import { FacilityBriefing, AiDiagnosis, ChatMessage, Room, ArOverlayData, PlantBatch } from "../types";
 import { BRIEFING_PROMPT, SYSTEM_INSTRUCTION_GROWER } from "../constants";
+import { buildFacilityContext } from "../utils/buildContext";
 
 // Models
 const MODEL_REASONING =
@@ -10,6 +11,13 @@ const MODEL_REASONING =
 export const CHAT_MODEL_ID = MODEL_REASONING;
 const MODEL_FAST = 'gemini-2.5-flash';
 const MODEL_VISION = 'gemini-2.5-flash'; // 2.5 flash is great for fast vision
+
+type ChatContext = { rooms?: Room[]; batches?: PlantBatch[] };
+
+const buildSystemInstruction = (ctx?: ChatContext) => {
+  const block = ctx ? buildFacilityContext(ctx.rooms, ctx.batches) : '';
+  return SYSTEM_INSTRUCTION_GROWER + (block ? `\n\n## CURRENT FACILITY STATE (live)\n${block}` : '');
+};
 
 class GeminiService {
   private ai: GoogleGenAI;
@@ -171,7 +179,7 @@ class GeminiService {
     return JSON.parse(response.text) as ArOverlayData;
   }
 
-  createChatSession(history: ChatMessage[]) {
+  createChatSession(history: ChatMessage[], ctx?: ChatContext) {
     return this.ai.chats.create({
       model: MODEL_REASONING,
       history: history.map(h => ({
@@ -179,12 +187,12 @@ class GeminiService {
         parts: [{ text: h.text }]
       })),
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION_GROWER,
+        systemInstruction: buildSystemInstruction(ctx),
       }
     });
   }
 
-  async chat(history: ChatMessage[], newMessage: string): Promise<string> {
+  async chat(history: ChatMessage[], newMessage: string, ctx?: ChatContext): Promise<string> {
     return this.withRetry(async () => {
         // Manual history construction for chat
         const contents = history.map(h => ({
@@ -199,7 +207,7 @@ class GeminiService {
             model: MODEL_REASONING,
             contents: contents,
             config: {
-                systemInstruction: SYSTEM_INSTRUCTION_GROWER,
+                systemInstruction: buildSystemInstruction(ctx),
             }
         });
 
@@ -207,7 +215,7 @@ class GeminiService {
     });
   }
   
-  async chatStream(history: ChatMessage[], newMessage: string): Promise<AsyncIterable<string>> {
+  async chatStream(history: ChatMessage[], newMessage: string, ctx?: ChatContext): Promise<AsyncIterable<string>> {
       const contents = history.map(h => ({
           role: h.role,
           parts: [{ text: h.text }]
@@ -218,7 +226,7 @@ class GeminiService {
           model: MODEL_REASONING,
           contents: contents,
           config: {
-              systemInstruction: SYSTEM_INSTRUCTION_GROWER,
+              systemInstruction: buildSystemInstruction(ctx),
           }
       });
 
