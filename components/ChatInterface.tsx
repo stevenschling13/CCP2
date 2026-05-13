@@ -2,8 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CHAT_MODEL_ID, geminiService } from '../services/geminiService';
-import { ChatMessage } from '../types';
+import { ChatMessage, PlantBatch, Room } from '../types';
 import { clearMessages, loadMessages, saveMessages } from '../utils/chatStore';
+
+type ChatInterfaceProps = {
+    rooms?: Room[];
+    batches?: PlantBatch[];
+};
 
 type UiChatMessage = ChatMessage & {
     error?: boolean;
@@ -53,7 +58,7 @@ const formatDiagnosis = (diagnosis: Awaited<ReturnType<typeof geminiService.anal
     return `**Image diagnosis** — Health: ${Math.round(diagnosis.healthScore)}/100 (confidence ${Math.round(confidence)}%)\n\nIssues:\n${issues.map(issue => `- ${issue}`).join('\n')}\n\nRecommendations:\n${recommendations.map(item => `- ${item}`).join('\n')}`;
 };
 
-export const ChatInterface: React.FC = () => {
+export const ChatInterface: React.FC<ChatInterfaceProps> = ({ rooms, batches }) => {
     const [messages, setMessages] = useState<UiChatMessage[]>([greeting]);
     const [input, setInput] = useState('');
     const [isHydrated, setIsHydrated] = useState(false);
@@ -118,7 +123,7 @@ export const ChatInterface: React.FC = () => {
 
         let accumulated = '';
         try {
-            const stream = await geminiService.chatStream(cleanHistory(history), prompt);
+            const stream = await geminiService.chatStream(cleanHistory(history), prompt, { rooms, batches });
             for await (const token of stream) {
                 if (cancelledRef.current) break;
                 accumulated += token;
@@ -258,6 +263,9 @@ export const ChatInterface: React.FC = () => {
     };
 
     const canShowSuggestions = messages.length <= 1;
+    const roomCount = rooms?.length ?? 0;
+    const activeBatchCount = batches?.filter(batch => batch.isActive).length ?? 0;
+    const showAwarenessChip = roomCount > 0 || activeBatchCount > 0;
 
     return (
         <div className="flex flex-col h-full bg-black pb-20">
@@ -265,6 +273,11 @@ export const ChatInterface: React.FC = () => {
                 <div>
                     <p className="text-xs uppercase tracking-[0.25em] text-neon-green">Cultivation CoPilot</p>
                     <p className="mt-1 text-xs text-gray-500">Model: {CHAT_MODEL_ID}</p>
+                    {showAwarenessChip && (
+                        <p className="mt-2 inline-flex rounded-full border border-neutral-800 bg-neutral-900 px-2 py-1 text-[11px] text-gray-400">
+                            Aware of {roomCount} rooms · {activeBatchCount} active batches
+                        </p>
+                    )}
                 </div>
                 <button
                     type="button"
