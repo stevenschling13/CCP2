@@ -3,7 +3,11 @@ import { FacilityBriefing, AiDiagnosis, ChatMessage, Room, ArOverlayData } from 
 import { BRIEFING_PROMPT, SYSTEM_INSTRUCTION_GROWER } from "../constants";
 
 // Models
-const MODEL_REASONING = 'gemini-3-pro-preview';
+const MODEL_REASONING =
+  import.meta.env?.VITE_GEMINI_CHAT_MODEL ||
+  (typeof process !== 'undefined' ? process.env.VITE_GEMINI_CHAT_MODEL : undefined) ||
+  'gemini-3.1-pro-preview';
+export const CHAT_MODEL_ID = MODEL_REASONING;
 const MODEL_FAST = 'gemini-2.5-flash';
 const MODEL_VISION = 'gemini-2.5-flash'; // 2.5 flash is great for fast vision
 
@@ -19,7 +23,10 @@ class GeminiService {
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor() {
-    const apiKey = process.env.API_KEY || '';
+    const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+    if (!apiKey) {
+      console.warn('Gemini API key is missing. Set GEMINI_API_KEY or API_KEY to enable Gemini chat features.');
+    }
     this.ai = new GoogleGenAI({ apiKey });
   }
 
@@ -162,6 +169,19 @@ class GeminiService {
     
     if (!response.text) return { status: 'SCANNING', detectedObjects: [], healthEstimate: 0 };
     return JSON.parse(response.text) as ArOverlayData;
+  }
+
+  createChatSession(history: ChatMessage[]) {
+    return this.ai.chats.create({
+      model: MODEL_REASONING,
+      history: history.map(h => ({
+        role: h.role,
+        parts: [{ text: h.text }]
+      })),
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION_GROWER,
+      }
+    });
   }
 
   async chat(history: ChatMessage[], newMessage: string): Promise<string> {
